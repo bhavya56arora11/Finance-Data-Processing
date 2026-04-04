@@ -20,7 +20,6 @@ export class AppError extends Error {
     this.details = details;
     this.isOperational = true;
 
-    // Capture proper stack trace in V8 environments
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, this.constructor);
     }

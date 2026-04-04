@@ -12,67 +12,32 @@ import {
   approveTransaction,
   rejectTransaction,
   voidTransaction,
+  exportTransactions,
+  searchTransactions,
+  restoreTransaction,
+  listDeletedTransactions,
 } from '../controllers/transactionController.js';
 
 const router = Router();
 
-// All transaction routes require authentication
 router.use(authenticate);
 
-// Create a new transaction
-router.post(
-  '/',
-  requirePermission(PERMISSIONS.CREATE_TRANSACTIONS),
-  createTransaction
-);
+router.post('/', requirePermission(PERMISSIONS.CREATE_TRANSACTIONS), createTransaction);
 
-// List with filters, pagination, scope
-router.get(
-  '/',
-  requirePermission(PERMISSIONS.READ_TRANSACTIONS),
-  scopeFilter,
-  listTransactions
-);
+// Static paths before /:id to avoid param matching
+router.get('/export', requirePermission(PERMISSIONS.EXPORT_DATA), scopeFilter, exportTransactions);
+router.get('/search', requirePermission(PERMISSIONS.READ_TRANSACTIONS), scopeFilter, searchTransactions);
+router.get('/deleted', requirePermission(PERMISSIONS.VIEW_DELETED), scopeFilter, listDeletedTransactions);
 
-// Single transaction with scope check
-router.get(
-  '/:id',
-  requirePermission(PERMISSIONS.READ_TRANSACTIONS),
-  scopeFilter,
-  getTransactionById
-);
+router.get('/', requirePermission(PERMISSIONS.READ_TRANSACTIONS), scopeFilter, listTransactions);
+router.get('/:id', requirePermission(PERMISSIONS.READ_TRANSACTIONS), scopeFilter, getTransactionById);
 
-// Full/partial update
-router.put(
-  '/:id',
-  requirePermission(PERMISSIONS.UPDATE_TRANSACTIONS),
-  updateTransaction
-);
+router.put('/:id', requirePermission(PERMISSIONS.UPDATE_TRANSACTIONS), updateTransaction);
+router.delete('/:id', requirePermission(PERMISSIONS.DELETE_TRANSACTIONS), deleteTransaction);
 
-// Soft delete
-router.delete(
-  '/:id',
-  requirePermission(PERMISSIONS.DELETE_TRANSACTIONS),
-  deleteTransaction
-);
-
-router.patch(
-  '/:id/approve',
-  requirePermission(PERMISSIONS.APPROVE_TRANSACTIONS),
-  approveTransaction
-);
-
-router.patch(
-  '/:id/reject',
-  requirePermission(PERMISSIONS.APPROVE_TRANSACTIONS),
-  rejectTransaction
-);
-
-// update:transactions permission + role check enforced in service layer
-router.patch(
-  '/:id/void',
-  requirePermission(PERMISSIONS.UPDATE_TRANSACTIONS),
-  voidTransaction
-);
+router.patch('/:id/approve', requirePermission(PERMISSIONS.APPROVE_TRANSACTIONS), approveTransaction);
+router.patch('/:id/reject', requirePermission(PERMISSIONS.APPROVE_TRANSACTIONS), rejectTransaction);
+router.patch('/:id/void', requirePermission(PERMISSIONS.UPDATE_TRANSACTIONS), voidTransaction);
+router.patch('/:id/restore', requirePermission(PERMISSIONS.DELETE_TRANSACTIONS), restoreTransaction);
 
 export default router;

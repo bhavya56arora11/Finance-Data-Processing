@@ -10,40 +10,40 @@ import { env } from './config/env.js';
 import { errorHandler } from './errors/errorHandler.js';
 import { RateLimitError } from './errors/errorTypes.js';
 
-import authRouter         from './routes/auth.js';
-import usersRouter        from './routes/users.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
 import transactionsRouter from './routes/transactions.js';
-import dashboardRouter    from './routes/dashboard.js';
+import dashboardRouter from './routes/dashboard.js';
+import categoriesRouter from './routes/categories.js';
+import reportsRouter from './routes/reports.js';
+import notificationsRouter from './routes/notifications.js';
+import { setupSwagger } from './docs/swagger.js';
 
-// ─── App Initialization ───────────────────────────────────────────────────────
+// App Initialization 
 
 const app = express();
 
-// ─── Request ID Middleware ─────────────────────────────────────────────────────
+// Request ID Middleware  
 // Attach a unique ID to every request so errors can be correlated in logs.
 app.use((req, _res, next) => {
   req.id = uuidv4();
   next();
 });
 
-// ─── Body Parser ──────────────────────────────────────────────────────────────
+// Body Parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Cookie Parser ────────────────────────────────────────────────────────────
+// Cookie Parser 
 // Required to read the httpOnly refresh token cookie on POST /auth/refresh
 app.use(cookieParser());
 
-// ─── Request Logger ───────────────────────────────────────────────────────────
+// Request Logger
 // Use 'combined' in production for standard Apache log format; 'dev' for terse dev output.
 app.use(morgan(env.isDev ? 'dev' : 'combined'));
 
-// ─── Rate Limiters ────────────────────────────────────────────────────────────
+// Rate Limiters 
 
-/**
- * Custom handler ensures rate limit errors follow the same error envelope
- * as every other error in the system, instead of express-rate-limit's default text response.
- */
 const rateLimitHandler = (_req, res) => {
   const err = new RateLimitError();
   return res.status(err.statusCode).json({
@@ -85,19 +85,25 @@ const readLimiter = rateLimit({
   handler: rateLimitHandler,
 });
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
+// Routes 
 
-app.use('/auth',         authLimiter,  authRouter);
-app.use('/users',        writeLimiter, usersRouter);
+app.use('/auth', authLimiter, authRouter);
+app.use('/users', writeLimiter, usersRouter);
 app.use('/transactions', writeLimiter, transactionsRouter);
-app.use('/dashboard',    readLimiter,  dashboardRouter);
+app.use('/dashboard', readLimiter, dashboardRouter);
+app.use('/categories', readLimiter, categoriesRouter);
+app.use('/reports', readLimiter, reportsRouter);
+app.use('/notifications', readLimiter, notificationsRouter);
 
-// ─── Health Check ─────────────────────────────────────────────────────────────
+// Swagger Documentation
+setupSwagger(app);
+
+// Health Check 
 app.get('/health', readLimiter, (_req, res) => {
   res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
 });
 
-// ─── 404 Handler ─────────────────────────────────────────────────────────────
+// 404 Handler 
 // Catches all routes not matched above. Returns JSON — never HTML.
 app.use((req, res) => {
   res.status(404).json({
@@ -112,11 +118,11 @@ app.use((req, res) => {
   });
 });
 
-// ─── Global Error Handler ─────────────────────────────────────────────────────
+// Global Error Handler 
 // Must be LAST middleware. Express identifies it by the 4-parameter signature.
 app.use(errorHandler);
 
-// ─── Bootstrap ───────────────────────────────────────────────────────────────
+// Bootstrap  
 
 async function start() {
   await connectDB();

@@ -1,24 +1,15 @@
 import { Router } from 'express';
-import {
-  register,
-  login,
-  refresh,
-  logout,
-} from '../controllers/authController.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { register, login, refresh, logout, getMe } from '../controllers/authController.js';
 
 const router = Router();
 
-
-// creates a new viewer-role account.
 router.post('/register', register);
-
-// authenticates credentials, issues tokens.
 router.post('/login', login);
-
-// issues new access token using the httpOnly refresh cookie.
 router.post('/refresh', refresh);
-
-// clears the refresh token cookie.
 router.post('/logout', logout);
+
+// Authenticated — returns current user profile
+router.get('/me', authenticate, getMe);
 
 export default router;

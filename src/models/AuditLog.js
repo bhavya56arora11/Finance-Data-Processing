@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+// Schema 
 
 const auditLogSchema = new Schema(
   {
@@ -40,9 +40,9 @@ const auditLogSchema = new Schema(
     },
 
     // Request metadata for security auditing
-    ipAddress:  { type: String, default: null },
-    userAgent:  { type: String, default: null },
-    requestId:  { type: String, default: null },
+    ipAddress: { type: String, default: null },
+    userAgent: { type: String, default: null },
+    requestId: { type: String, default: null },
 
     timestamp: {
       type: Date,
@@ -63,21 +63,13 @@ const auditLogSchema = new Schema(
   }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────────────
+// Indexes 
 
-// Query pattern: "show me all actions performed by user X, newest first"
 auditLogSchema.index({ performedBy: 1, timestamp: -1 });
-
-// Query pattern: "show me all changes to this specific transaction"
 auditLogSchema.index({ targetResource: 1, targetId: 1, timestamp: -1 });
-
-// Query pattern: "show all actions of type X in a time window"
 auditLogSchema.index({ action: 1, timestamp: -1 });
 
-// TTL index could be added here in Phase 2 for automatic log rotation:
-// auditLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 365 });
-
-// ─── Model ────────────────────────────────────────────────────────────────────
+// Model 
 
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 

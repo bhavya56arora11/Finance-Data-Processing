@@ -6,23 +6,23 @@ import {
 
 const { Schema } = mongoose;
 
-// ─── Change History Sub-schema ────────────────────────────────────────────────
+// Change History Sub-schema 
 
 const changeHistorySchema = new Schema(
   {
-    modifiedBy:     { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    modifiedAt:     { type: Date, default: Date.now },
-    changedFields:  [String],
+    modifiedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    modifiedAt: { type: Date, default: Date.now },
+    changedFields: [String],
     previousValues: { type: Schema.Types.Mixed },
   },
   { _id: false }
 );
 
-// ─── Main Schema ──────────────────────────────────────────────────────────────
+// Main Schema
 
 const transactionSchema = new Schema(
   {
-    // ── Financials ───────────────────────────────────────────────────────────
+    // Financials
     amount: {
       type: Number,
       required: [true, 'Amount is required'],
@@ -38,11 +38,11 @@ const transactionSchema = new Schema(
     },
 
     // Stored in base currency (USD) for aggregation consistency.
-    // Phase 2 will wire in a real FX conversion service.
+    // Placeholder — real FX conversion requires an external rates API.
     convertedAmount: { type: Number, default: null },
-    baseCurrency:    { type: String, default: 'USD', uppercase: true },
+    baseCurrency: { type: String, default: 'USD', uppercase: true },
 
-    // ── Classification ───────────────────────────────────────────────────────
+    // Classification 
     type: {
       type: String,
       enum: {
@@ -54,26 +54,33 @@ const transactionSchema = new Schema(
 
     subtype: { type: String, trim: true, default: null },
 
+    // Category reference (ObjectId pointing to the Category collection)
     category: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: 'Category',
       required: [true, 'Category is required'],
+    },
+
+    description: {
+      type: String,
+      required: [true, 'Description is required'],
       trim: true,
-      minlength: [2, 'Category must be at least 2 characters'],
+      maxlength: [200, 'Description cannot exceed 200 characters'],
     },
 
     tags: [{ type: String, trim: true }],
 
-    // ── Date & Fiscal Period ─────────────────────────────────────────────────
+    // Date & Fiscal Period
     date: {
       type: Date,
       required: [true, 'Transaction date is required'],
     },
 
     // Computed automatically by the pre-save hook — do not set manually
-    fiscalYear:    { type: Number },
+    fiscalYear: { type: Number },
     fiscalQuarter: { type: Number, min: 1, max: 4 },
 
-    // ── Status & Approval ────────────────────────────────────────────────────
+    // Status & Approval
     status: {
       type: String,
       enum: {
@@ -84,9 +91,9 @@ const transactionSchema = new Schema(
     },
 
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-    approvedAt:  { type: Date, default: null },
+    approvedAt: { type: Date, default: null },
 
-    // ── Metadata ─────────────────────────────────────────────────────────────
+    // Metadata 
     notes: {
       type: String,
       maxlength: [1000, 'Notes cannot exceed 1000 characters'],
@@ -102,19 +109,19 @@ const transactionSchema = new Schema(
     },
 
     counterparty: { type: String, trim: true, default: null },
-    department:   { type: String, trim: true, default: null },
-    project:      { type: String, trim: true, default: null },
+    department: { type: String, trim: true, default: null },
+    project: { type: String, trim: true, default: null },
 
-    // ── Ownership ────────────────────────────────────────────────────────────
-    createdBy:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    lastModifiedBy:  { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    // Ownership 
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    lastModifiedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 
-    // ── Soft Delete ──────────────────────────────────────────────────────────
-    isDeleted:  { type: Boolean, default: false },
-    deletedAt:  { type: Date, default: null },
-    deletedBy:  { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    // Soft Delete 
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 
-    // ── Audit Trail ──────────────────────────────────────────────────────────
+    // Audit Trail 
     changeHistory: [changeHistorySchema],
   },
   {
@@ -130,11 +137,11 @@ const transactionSchema = new Schema(
   }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────────────
+// Indexes 
 
 // Text index for free-text search across key string fields
 transactionSchema.index(
-  { notes: 'text', counterparty: 'text', category: 'text', referenceNumber: 'text' },
+  { description: 'text', notes: 'text', counterparty: 'text', referenceNumber: 'text' },
   { name: 'transaction_text_search' }
 );
 
@@ -146,7 +153,7 @@ transactionSchema.index({ createdBy: 1, date: -1 });
 transactionSchema.index({ fiscalYear: 1, fiscalQuarter: 1 });
 transactionSchema.index({ referenceNumber: 1 }, { unique: true, sparse: true });
 
-// ─── Helper — Compute Fiscal Period ──────────────────────────────────────────
+// Helper — Compute Fiscal Period
 
 /**
  * Fiscal year starts January 1st (calendar year).
@@ -163,7 +170,7 @@ function computeFiscalPeriod(date) {
   return { fiscalYear, fiscalQuarter };
 }
 
-// ─── Pre-save Hooks ───────────────────────────────────────────────────────────
+// Pre-save Hooks
 
 transactionSchema.pre('save', function computeFiscalFields(next) {
   if (this.isModified('date') || this.isNew) {
@@ -178,7 +185,7 @@ transactionSchema.pre('save', function trackChangeHistory(next) {
   // Only track changes on existing documents (not initial creation)
   if (this.isNew) return next();
 
-  const trackedFields = ['amount', 'currency', 'type', 'subtype', 'category', 'date', 'status', 'notes'];
+  const trackedFields = ['amount', 'currency', 'type', 'subtype', 'category', 'description', 'date', 'status', 'notes'];
   const changedFields = trackedFields.filter((f) => this.isModified(f));
 
   if (changedFields.length === 0) return next();
@@ -187,8 +194,8 @@ transactionSchema.pre('save', function trackChangeHistory(next) {
   // to avoid a redundant DB read here
   if (this._previousValues) {
     this.changeHistory.push({
-      modifiedBy:     this.lastModifiedBy,
-      modifiedAt:     new Date(),
+      modifiedBy: this.lastModifiedBy,
+      modifiedAt: new Date(),
       changedFields,
       previousValues: this._previousValues,
     });
@@ -198,7 +205,7 @@ transactionSchema.pre('save', function trackChangeHistory(next) {
   next();
 });
 
-// ─── Query Middleware — Soft Delete Filter ────────────────────────────────────
+// Query Middleware — Soft Delete Filter
 
 /**
  * Automatically filters out soft-deleted records on all find operations,
@@ -219,7 +226,7 @@ transactionSchema.pre('findOne', softDeleteFilter);
 transactionSchema.pre('findOneAndUpdate', softDeleteFilter);
 transactionSchema.pre('countDocuments', softDeleteFilter);
 
-// ─── Model ────────────────────────────────────────────────────────────────────
+// Model
 
 const Transaction = mongoose.model('Transaction', transactionSchema);
 

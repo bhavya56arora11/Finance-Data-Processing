@@ -1,7 +1,3 @@
-/**
- * Centralized permission registry.
- * All permission strings live here — never hardcode them in routes or middleware.
- */
 export const PERMISSIONS = {
   READ_TRANSACTIONS:    'read:transactions',
   CREATE_TRANSACTIONS:  'create:transactions',

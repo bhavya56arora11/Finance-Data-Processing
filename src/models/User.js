@@ -4,7 +4,7 @@ import { ROLES } from '../constants/roles.js';
 
 const { Schema } = mongoose;
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+// Schema 
 
 const userSchema = new Schema(
   {
@@ -70,6 +70,13 @@ const userSchema = new Schema(
       default: null,
     },
 
+    // Hashed refresh token for rotation detection
+    refreshTokenHash: {
+      type: String,
+      select: false,
+      default: null,
+    },
+
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -79,7 +86,6 @@ const userSchema = new Schema(
   {
     timestamps: true, // createdAt, updatedAt
     toJSON: {
-      // Strip __v and transform _id → id in JSON output
       versionKey: false,
       transform(_doc, ret) {
         ret.id = ret._id;
@@ -91,14 +97,12 @@ const userSchema = new Schema(
   }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────────────
+// Indexes 
 
-// email index is implicit from unique: true
-// Additional query patterns
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ department: 1 });
 
-// ─── Pre-save Hook — Password Hashing ────────────────────────────────────────
+// Pre-save Hook — Password Hashing 
 
 userSchema.pre('save', async function hashPassword(next) {
   // Only hash if the password field was actually modified
@@ -113,35 +117,20 @@ userSchema.pre('save', async function hashPassword(next) {
   }
 });
 
-// ─── Instance Methods ─────────────────────────────────────────────────────────
+// Instance Methods 
 
-/**
- * Safely compares a plaintext candidate password against the stored hash.
- * Returns false rather than throwing if the password field is unavailable.
- *
- * @param {string} candidatePassword
- * @returns {Promise<boolean>}
- */
 userSchema.methods.comparePassword = async function comparePassword(candidatePassword) {
-  // this.password may be undefined if the document was queried without +password
   if (!this.password) return false;
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// ─── Static Methods ───────────────────────────────────────────────────────────
+// Static Methods 
 
-/**
- * Find a user by email, explicitly selecting the password field.
- * Used only in the login flow; the rest of the app never needs the hash.
- *
- * @param {string} email
- * @returns {Promise<import('mongoose').HydratedDocument<User> | null>}
- */
 userSchema.statics.findByEmail = function findByEmail(email) {
   return this.findOne({ email: email.toLowerCase().trim() }).select('+password');
 };
 
-// ─── Model ────────────────────────────────────────────────────────────────────
+// Model 
 
 const User = mongoose.model('User', userSchema);
 

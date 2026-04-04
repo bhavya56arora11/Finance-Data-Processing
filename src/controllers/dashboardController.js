@@ -4,8 +4,6 @@ import * as dashboardService from '../services/dashboardService.js';
 import { sendSuccess } from '../utils/responseFormatter.js';
 import { ValidationError } from '../errors/errorTypes.js';
 
-// ─── Validation Schemas ───────────────────────────────────────────────────────
-
 const categoryBreakdownSchema = z.object({
   type:       z.enum(Object.values(TRANSACTION_TYPES)).optional(),
   from:       z.string().optional(),
@@ -14,16 +12,15 @@ const categoryBreakdownSchema = z.object({
 });
 
 const trendsSchema = z.object({
-  period: z.enum(['monthly', 'weekly']).default('monthly'),
-  from:   z.string().optional(),
-  to:     z.string().optional(),
+  period:    z.enum(['monthly', 'weekly']).default('monthly'),
+  from:      z.string().optional(),
+  to:        z.string().optional(),
+  timeframe: z.enum(['6m', '1y', 'all']).default('all'),
 });
 
 const recentActivitySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
-
-// ─── Validation Helper ────────────────────────────────────────────────────────
 
 function validate(schema, data) {
   const result = schema.safeParse(data);
@@ -37,11 +34,6 @@ function validate(schema, data) {
   return result.data;
 }
 
-// ─── Controllers ──────────────────────────────────────────────────────────────
-
-/**
- * GET /dashboard/summary
- */
 export async function getSummary(req, res, next) {
   try {
     const data = await dashboardService.getSummary(req.queryScope);
@@ -51,9 +43,6 @@ export async function getSummary(req, res, next) {
   }
 }
 
-/**
- * GET /dashboard/category-breakdown
- */
 export async function getCategoryBreakdown(req, res, next) {
   try {
     const filters = validate(categoryBreakdownSchema, req.query);
@@ -64,9 +53,6 @@ export async function getCategoryBreakdown(req, res, next) {
   }
 }
 
-/**
- * GET /dashboard/trends
- */
 export async function getTrends(req, res, next) {
   try {
     const params = validate(trendsSchema, req.query);
@@ -77,9 +63,6 @@ export async function getTrends(req, res, next) {
   }
 }
 
-/**
- * GET /dashboard/department-breakdown
- */
 export async function getDepartmentBreakdown(req, res, next) {
   try {
     const data = await dashboardService.getDepartmentBreakdown(req.queryScope);
@@ -89,9 +72,6 @@ export async function getDepartmentBreakdown(req, res, next) {
   }
 }
 
-/**
- * GET /dashboard/recent-activity
- */
 export async function getRecentActivity(req, res, next) {
   try {
     const { limit } = validate(recentActivitySchema, req.query);

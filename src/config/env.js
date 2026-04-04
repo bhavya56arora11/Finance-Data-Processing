@@ -13,10 +13,6 @@ const REQUIRED_ENV_VARS = [
   'BASE_CURRENCY',
 ];
 
-/**
- * Validates all required environment variables at startup.
- * Throws an error immediately if any are missing, preventing misconfigured deploys.
- */
 function validateEnv() {
   const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
 

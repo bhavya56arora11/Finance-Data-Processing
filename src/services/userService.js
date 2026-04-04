@@ -1,5 +1,6 @@
 import User from '../models/User.js';
 import * as auditService from './auditService.js';
+import * as notificationService from './notificationService.js';
 import { ROLES, getRolePermissions } from '../constants/roles.js';
 import {
   NotFoundError,
@@ -8,7 +9,7 @@ import {
   AuthorizationError,
 } from '../errors/errorTypes.js';
 
-// ─── Query ────────────────────────────────────────────────────────────────────
+// Query 
 
 /**
  * Returns a paginated list of users with optional filters.
@@ -23,8 +24,8 @@ import {
  */
 export async function listUsers({ role, status, department, page = 1, limit = 20 } = {}) {
   const filter = {};
-  if (role)       filter.role       = role;
-  if (status)     filter.status     = status;
+  if (role) filter.role = role;
+  if (status) filter.status = status;
   if (department) filter.department = department;
 
   const skip = (page - 1) * limit;
@@ -54,7 +55,7 @@ export async function getUserById(id) {
   return user;
 }
 
-// ─── Update ───────────────────────────────────────────────────────────────────
+// Update 
 
 /**
  * Updates allowed profile fields on a user.
@@ -84,9 +85,9 @@ export async function updateUser({ targetId, updates, requestingUser, requestId 
   }
 
   const before = {
-    name:       user.name,
+    name: user.name,
     department: user.department,
-    status:     user.status,
+    status: user.status,
   };
 
   // Apply only the allowed fields
@@ -101,13 +102,23 @@ export async function updateUser({ targetId, updates, requestingUser, requestId 
   await user.save();
 
   await auditService.log({
-    action:         'UPDATE_USER',
-    performedBy:    requestingUser.id,
+    action: 'UPDATE_USER',
+    performedBy: requestingUser.id,
     targetResource: 'User',
-    targetId:       user._id,
-    changes:        { before, after: { name: user.name, department: user.department, status: user.status } },
+    targetId: user._id,
+    changes: { before, after: { name: user.name, department: user.department, status: user.status } },
     requestId,
   });
+
+  // Notify user if their status changed
+  if (before.status !== user.status) {
+    notificationService.notify({
+      recipient: user._id, type: 'ACCOUNT_STATUS_CHANGED',
+      title: 'Account Status Updated',
+      message: `Your account status has been changed from "${before.status}" to "${user.status}".`,
+      data: { resourceType: 'User', resourceId: user._id },
+    }).catch(() => { });
+  }
 
   return user.toJSON();
 }
@@ -142,13 +153,21 @@ export async function changeUserRole({ targetId, newRole, requestingUser, reques
   await user.save();
 
   await auditService.log({
-    action:         'ROLE_CHANGE',
-    performedBy:    requestingUser.id,
+    action: 'ROLE_CHANGE',
+    performedBy: requestingUser.id,
     targetResource: 'User',
-    targetId:       user._id,
-    changes:        { before: { role: oldRole }, after: { role: newRole } },
+    targetId: user._id,
+    changes: { before: { role: oldRole }, after: { role: newRole } },
     requestId,
   });
+
+  // Notify the user about their role change
+  notificationService.notify({
+    recipient: user._id, type: 'ROLE_CHANGED',
+    title: 'Your Role Has Been Changed',
+    message: `Your role has been changed from "${oldRole}" to "${newRole}".`,
+    data: { resourceType: 'User', resourceId: user._id },
+  }).catch(() => { });
 
   return user.toJSON();
 }
@@ -174,11 +193,11 @@ export async function softDeleteUser({ targetId, requestingUser, requestId }) {
   await user.save();
 
   await auditService.log({
-    action:         'DELETE_USER',
-    performedBy:    requestingUser.id,
+    action: 'DELETE_USER',
+    performedBy: requestingUser.id,
     targetResource: 'User',
-    targetId:       user._id,
-    changes:        { before, after: { status: 'inactive' } },
+    targetId: user._id,
+    changes: { before, after: { status: 'inactive' } },
     requestId,
   });
 }

@@ -2,9 +2,6 @@ import { PERMISSIONS } from './permissions.js';
 
 const P = PERMISSIONS;
 
-/**
- * Role name constants — use these everywhere instead of raw strings.
- */
 export const ROLES = {
   SUPER_ADMIN:      'super_admin',
   ADMIN:            'admin',
@@ -16,10 +13,6 @@ export const ROLES = {
   EXTERNAL_AUDITOR: 'external_auditor',
 };
 
-/**
- * Maps each role to its exact set of permissions.
- * This is the authoritative source — JWT payload is built from this map.
- */
 export const ROLE_PERMISSIONS = {
   [ROLES.SUPER_ADMIN]: Object.values(P),
 
@@ -77,14 +70,6 @@ export const ROLE_PERMISSIONS = {
   ],
 };
 
-/**
- * Returns the permissions array for a given role.
- * Returns an empty array for unknown roles rather than throwing,
- * since this may be called during token validation.
- *
- * @param {string} role
- * @returns {string[]}
- */
 export function getRolePermissions(role) {
   return ROLE_PERMISSIONS[role] ?? [];
 }

@@ -1,4 +1,4 @@
-// ─── Filter Builder ───────────────────────────────────────────────────────────
+// Filter Builder ─
 
 /**
  * Constructs a MongoDB filter from transaction query parameters.
@@ -49,21 +49,21 @@ export function buildTransactionFilter({
   }
 
   // Exact string matches
-  if (type)          filter.type          = type;
-  if (subtype)       filter.subtype       = subtype;
-  if (status)        filter.status        = status;
-  if (department)    filter.department    = department;
-  if (project)       filter.project       = project;
-  if (currency)      filter.currency      = currency.toUpperCase();
-  if (createdBy)     filter.createdBy     = createdBy;
+  if (type) filter.type = type;
+  if (subtype) filter.subtype = subtype;
+  if (status) filter.status = status;
+  if (department) filter.department = department;
+  if (project) filter.project = project;
+  if (currency) filter.currency = currency.toUpperCase();
+  if (createdBy) filter.createdBy = createdBy;
 
   // Numeric exact matches
-  if (fiscalYear)    filter.fiscalYear    = Number(fiscalYear);
+  if (fiscalYear) filter.fiscalYear = Number(fiscalYear);
   if (fiscalQuarter) filter.fiscalQuarter = Number(fiscalQuarter);
 
-  // Category: case-insensitive regex for partial match (e.g. "payroll" matches "Payroll Expenses")
+  // Category: exact ObjectId match
   if (category) {
-    filter.category = { $regex: category, $options: 'i' };
+    filter.category = category;
   }
 
   // Tags: match if the transaction has ANY of the requested tags
@@ -75,7 +75,7 @@ export function buildTransactionFilter({
   if (from || to) {
     filter.date = {};
     if (from) filter.date.$gte = new Date(from);
-    if (to)   filter.date.$lte = new Date(to);
+    if (to) filter.date.$lte = new Date(to);
   }
 
   // Amount range
@@ -88,7 +88,7 @@ export function buildTransactionFilter({
   return filter;
 }
 
-// ─── Sort Builder ─────────────────────────────────────────────────────────────
+// Sort Builder 
 
 const ALLOWED_SORT_FIELDS = new Set([
   'date', 'amount', 'createdAt', 'updatedAt', 'status', 'type', 'category', 'fiscalYear',
@@ -101,13 +101,15 @@ const ALLOWED_SORT_FIELDS = new Set([
  * @param {string} [sortOrder='desc']
  * @returns {object}
  */
-export function buildSort(sortBy = 'date', sortOrder = 'desc') {
+// When search is active and no explicit sort, sort by text relevance
+export function buildSort(sortBy = 'date', sortOrder = 'desc', hasSearch = false) {
+  if (hasSearch && !sortBy) return { score: { $meta: 'textScore' } };
   const field = ALLOWED_SORT_FIELDS.has(sortBy) ? sortBy : 'date';
   const order = sortOrder === 'asc' ? 1 : -1;
   return { [field]: order };
 }
 
-// ─── Pagination ───────────────────────────────────────────────────────────────
+// Pagination ──
 
 /**
  * Converts page/limit into skip/limit values for Mongoose queries.
@@ -117,7 +119,7 @@ export function buildSort(sortBy = 'date', sortOrder = 'desc') {
  * @returns {{ skip: number, limit: number }}
  */
 export function buildPagination(page = 1, limit = 20) {
-  const safePage  = Math.max(1, Number(page));
+  const safePage = Math.max(1, Number(page));
   const safeLimit = Math.min(100, Math.max(1, Number(limit)));
   return { skip: (safePage - 1) * safeLimit, limit: safeLimit };
 }

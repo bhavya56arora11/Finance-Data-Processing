@@ -1,77 +1,61 @@
 import Transaction from '../models/Transaction.js';
 import { TRANSACTION_TYPES, TRANSACTION_STATUSES } from '../constants/transactionTypes.js';
 
-// ─── Scope Helper ─────────────────────────────────────────────────────────────
-
-/**
- * Converts req.queryScope into a $match stage for aggregation pipelines.
- * Removes the _includeDeleted meta-flag (not a real MongoDB field) and
- * ensures auditor queries bypass the soft-delete pre-find hook by using
- * the aggregation pipeline directly.
- *
- * @param {object} scope
- * @returns {{ matchStage: object, includeDeleted: boolean }}
- */
 function buildAggregationScope(scope) {
   const { _includeDeleted, ...matchStage } = scope ?? {};
-  // If auditor, include all records (even deleted) by not filtering isDeleted
   if (_includeDeleted) return { matchStage: {}, includeDeleted: true };
   return { matchStage: { isDeleted: false, ...matchStage }, includeDeleted: false };
 }
 
-// ─── Summary ──────────────────────────────────────────────────────────────────
+// Summary
 
-/**
- * Returns a top-level financial summary using a single $facet aggregation.
- * All values computed in one round-trip to the database.
- *
- * @param {object} scope - req.queryScope
- * @returns {Promise<object>}
- */
 export async function getSummary(scope) {
   const { matchStage } = buildAggregationScope(scope);
+
+  const now = new Date();
+  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const nextMonthStart    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const prevMonthStart    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
 
   const [result] = await Transaction.aggregate([
     { $match: matchStage },
     {
       $facet: {
-        // Total income (approved only for accurate balance)
         income: [
           { $match: { type: TRANSACTION_TYPES.INCOME, status: TRANSACTION_STATUSES.APPROVED } },
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ],
-        // Total expenses (approved only)
         expenses: [
           { $match: { type: TRANSACTION_TYPES.EXPENSE, status: TRANSACTION_STATUSES.APPROVED } },
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ],
-        // Total count across all statuses (for volume reporting)
-        totalCount: [
-          { $count: 'count' },
-        ],
-        // Pending approvals count
+        totalCount: [{ $count: 'count' }],
         pendingApprovals: [
           { $match: { status: TRANSACTION_STATUSES.PENDING_APPROVAL } },
           { $count: 'count' },
         ],
-        // Breakdown by status
         byStatus: [
           { $group: { _id: '$status', count: { $sum: 1 } } },
         ],
-        // Income and expense totals per currency
         byCurrency: [
-          {
-            $match: {
-              status:  TRANSACTION_STATUSES.APPROVED,
-              type:    { $in: [TRANSACTION_TYPES.INCOME, TRANSACTION_TYPES.EXPENSE] },
-            },
-          },
-          {
-            $group: {
-              _id:      { currency: '$currency', type: '$type' },
-              total:    { $sum: '$amount' },
-            },
-          },
+          { $match: { status: TRANSACTION_STATUSES.APPROVED, type: { $in: [TRANSACTION_TYPES.INCOME, TRANSACTION_TYPES.EXPENSE] } } },
+          { $group: { _id: { currency: '$currency', type: '$type' }, total: { $sum: '$amount' } } },
+        ],
+        currentMonthIncome: [
+          { $match: { type: TRANSACTION_TYPES.INCOME, status: TRANSACTION_STATUSES.APPROVED, date: { $gte: currentMonthStart, $lt: nextMonthStart } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ],
+        currentMonthExpenses: [
+          { $match: { type: TRANSACTION_TYPES.EXPENSE, status: TRANSACTION_STATUSES.APPROVED, date: { $gte: currentMonthStart, $lt: nextMonthStart } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ],
+        previousMonthIncome: [
+          { $match: { type: TRANSACTION_TYPES.INCOME, status: TRANSACTION_STATUSES.APPROVED, date: { $gte: prevMonthStart, $lt: currentMonthStart } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ],
+        previousMonthExpenses: [
+          { $match: { type: TRANSACTION_TYPES.EXPENSE, status: TRANSACTION_STATUSES.APPROVED, date: { $gte: prevMonthStart, $lt: currentMonthStart } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
         ],
       },
     },
@@ -80,13 +64,9 @@ export async function getSummary(scope) {
   const totalIncome   = result.income[0]?.total ?? 0;
   const totalExpenses = result.expenses[0]?.total ?? 0;
 
-  // Reshape byStatus array → { draft: 5, approved: 12, ... }
   const byStatus = {};
-  for (const s of result.byStatus) {
-    byStatus[s._id] = s.count;
-  }
+  for (const s of result.byStatus) byStatus[s._id] = s.count;
 
-  // Reshape byCurrency array → { USD: { income: 50000, expense: 12000 } }
   const byCurrency = {};
   for (const entry of result.byCurrency) {
     const { currency, type } = entry._id;
@@ -94,27 +74,43 @@ export async function getSummary(scope) {
     byCurrency[currency][type === TRANSACTION_TYPES.INCOME ? 'income' : 'expense'] = entry.total;
   }
 
+  // Growth calculation
+  const monthlyIncome   = result.currentMonthIncome[0]?.total ?? 0;
+  const monthlyExpenses = result.currentMonthExpenses[0]?.total ?? 0;
+  const currentMonthNet = monthlyIncome - monthlyExpenses;
+  const previousMonthNet = (result.previousMonthIncome[0]?.total ?? 0) - (result.previousMonthExpenses[0]?.total ?? 0);
+
+  let growthPercentage = 0;
+  let growthDirection  = 'neutral';
+  if (previousMonthNet !== 0) {
+    growthPercentage = ((currentMonthNet - previousMonthNet) / Math.abs(previousMonthNet)) * 100;
+    growthDirection  = growthPercentage > 0 ? 'up' : growthPercentage < 0 ? 'down' : 'neutral';
+    growthPercentage = Math.round(growthPercentage * 100) / 100;
+  }
+
   return {
     totalIncome,
     totalExpenses,
-    netBalance:         totalIncome - totalExpenses,
-    totalTransactions:  result.totalCount[0]?.count ?? 0,
-    pendingApprovals:   result.pendingApprovals[0]?.count ?? 0,
+    netBalance: totalIncome - totalExpenses,
+    totalTransactions: result.totalCount[0]?.count ?? 0,
+    pendingApprovals:  result.pendingApprovals[0]?.count ?? 0,
     byStatus,
     byCurrency,
+    monthlyIncome,
+    monthlyExpenses,
+    netSavings: currentMonthNet,
+    growth: {
+      percentage: growthPercentage,
+      direction:  growthDirection,
+      comparedTo: 'last_month',
+    },
   };
 }
 
-// ─── Category Breakdown ───────────────────────────────────────────────────────
+// Category Breakdown
 
-/**
- * @param {object} scope
- * @param {object} filters - { type?, from?, to?, fiscalYear? }
- * @returns {Promise<{ category: string, type: string, total: number, count: number }[]>}
- */
 export async function getCategoryBreakdown(scope, filters = {}) {
   const { matchStage } = buildAggregationScope(scope);
-
   const match = { ...matchStage };
   if (filters.type)       match.type       = filters.type;
   if (filters.fiscalYear) match.fiscalYear = Number(filters.fiscalYear);
@@ -126,36 +122,21 @@ export async function getCategoryBreakdown(scope, filters = {}) {
 
   return Transaction.aggregate([
     { $match: match },
-    {
-      $group: {
+    { $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'categoryDoc', pipeline: [{ $project: { name: 1, slug: 1 } }] } },
+    { $group: {
         _id:   { category: '$category', type: '$type' },
         total: { $sum: '$amount' },
         count: { $sum: 1 },
-      },
-    },
-    {
-      $project: {
-        _id:      0,
-        category: '$_id.category',
-        type:     '$_id.type',
-        total:    1,
-        count:    1,
-      },
-    },
+        categoryName: { $first: { $arrayElemAt: ['$categoryDoc.name', 0] } },
+    } },
+    { $project: { _id: 0, categoryId: '$_id.category', categoryName: 1, type: '$_id.type', total: 1, count: 1 } },
     { $sort: { total: -1 } },
   ]);
 }
 
-// ─── Trends ───────────────────────────────────────────────────────────────────
+// Trends
 
-/**
- * Groups approved income and expenses by calendar period (monthly or weekly).
- *
- * @param {object} scope
- * @param {object} params - { period, from, to }
- * @returns {Promise<{ period: string, income: number, expenses: number, net: number, transactionCount: number }[]>}
- */
-export async function getTrends(scope, { period = 'monthly', from, to } = {}) {
+export async function getTrends(scope, { period = 'monthly', from, to, timeframe } = {}) {
   const { matchStage } = buildAggregationScope(scope);
 
   const match = {
@@ -164,134 +145,97 @@ export async function getTrends(scope, { period = 'monthly', from, to } = {}) {
     type:   { $in: [TRANSACTION_TYPES.INCOME, TRANSACTION_TYPES.EXPENSE] },
   };
 
-  if (from || to) {
+  // Timeframe filter (6m or 1y override from/to)
+  if (timeframe && !from && !to) {
+    const now = new Date();
+    if (timeframe === '6m') {
+      match.date = { $gte: new Date(now.getFullYear(), now.getMonth() - 6, 1) };
+    } else if (timeframe === '1y') {
+      match.date = { $gte: new Date(now.getFullYear() - 1, now.getMonth(), 1) };
+    }
+  } else if (from || to) {
     match.date = {};
     if (from) match.date.$gte = new Date(from);
     if (to)   match.date.$lte = new Date(to);
   }
 
-  // $dateToString format string per period
   const dateFormat = period === 'weekly' ? '%G-W%V' : '%Y-%m';
 
-  return Transaction.aggregate([
+  const trends = await Transaction.aggregate([
     { $match: match },
-    {
-      $group: {
-        _id:              { period: { $dateToString: { format: dateFormat, date: '$date' } }, type: '$type' },
-        total:            { $sum: '$amount' },
+    { $group: {
+        _id: { period: { $dateToString: { format: dateFormat, date: '$date' } }, type: '$type' },
+        total: { $sum: '$amount' },
         transactionCount: { $sum: 1 },
-      },
-    },
-    {
-      // Pivot type dimension into income/expense fields
-      $group: {
-        _id:              '$_id.period',
-        income:           { $sum: { $cond: [{ $eq: ['$_id.type', TRANSACTION_TYPES.INCOME] }, '$total', 0] } },
-        expenses:         { $sum: { $cond: [{ $eq: ['$_id.type', TRANSACTION_TYPES.EXPENSE] }, '$total', 0] } },
+    } },
+    { $group: {
+        _id: '$_id.period',
+        income:   { $sum: { $cond: [{ $eq: ['$_id.type', TRANSACTION_TYPES.INCOME] }, '$total', 0] } },
+        expenses: { $sum: { $cond: [{ $eq: ['$_id.type', TRANSACTION_TYPES.EXPENSE] }, '$total', 0] } },
         transactionCount: { $sum: '$transactionCount' },
-      },
-    },
-    {
-      $project: {
-        _id:              0,
-        period:           '$_id',
-        income:           1,
-        expenses:         1,
-        net:              { $subtract: ['$income', '$expenses'] },
+    } },
+    { $project: {
+        _id: 0, period: '$_id',
+        income: 1, expenses: 1,
+        net: { $subtract: ['$income', '$expenses'] },
         transactionCount: 1,
-      },
-    },
+    } },
     { $sort: { period: 1 } },
   ]);
+
+  // Compute cumulativeBalance in-app
+  let cumulative = 0;
+  for (const t of trends) {
+    cumulative += t.net;
+    t.cumulativeBalance = Math.round(cumulative * 100) / 100;
+  }
+
+  return trends;
 }
 
-// ─── Department Breakdown ─────────────────────────────────────────────────────
+// Department Breakdown
 
-/**
- * @param {object} scope
- * @returns {Promise<{ department: string, income: number, expenses: number, net: number, count: number }[]>}
- */
 export async function getDepartmentBreakdown(scope) {
   const { matchStage } = buildAggregationScope(scope);
-
   const match = {
     ...matchStage,
-    status:     TRANSACTION_STATUSES.APPROVED,
-    type:       { $in: [TRANSACTION_TYPES.INCOME, TRANSACTION_TYPES.EXPENSE] },
+    status: TRANSACTION_STATUSES.APPROVED,
+    type:   { $in: [TRANSACTION_TYPES.INCOME, TRANSACTION_TYPES.EXPENSE] },
     department: { $ne: null },
   };
 
   return Transaction.aggregate([
     { $match: match },
-    {
-      $group: {
-        _id:      { department: '$department', type: '$type' },
-        total:    { $sum: '$amount' },
-        count:    { $sum: 1 },
-      },
-    },
-    {
-      $group: {
-        _id:      '$_id.department',
+    { $group: { _id: { department: '$department', type: '$type' }, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    { $group: {
+        _id: '$_id.department',
         income:   { $sum: { $cond: [{ $eq: ['$_id.type', TRANSACTION_TYPES.INCOME] }, '$total', 0] } },
         expenses: { $sum: { $cond: [{ $eq: ['$_id.type', TRANSACTION_TYPES.EXPENSE] }, '$total', 0] } },
-        count:    { $sum: '$count' },
-      },
-    },
-    {
-      $project: {
-        _id:        0,
-        department: '$_id',
-        income:     1,
-        expenses:   1,
-        net:        { $subtract: ['$income', '$expenses'] },
-        count:      1,
-      },
-    },
+        count: { $sum: '$count' },
+    } },
+    { $project: { _id: 0, department: '$_id', income: 1, expenses: 1, net: { $subtract: ['$income', '$expenses'] }, count: 1 } },
     { $sort: { net: -1 } },
   ]);
 }
 
-// ─── Recent Activity ──────────────────────────────────────────────────────────
+// Recent Activity
 
-/**
- * @param {object} scope
- * @param {number} [limit=10]
- * @returns {Promise<object[]>}
- */
 export async function getRecentActivity(scope, limit = 10) {
   const { matchStage, includeDeleted } = buildAggregationScope(scope);
   const safeLimit = Math.min(50, Math.max(1, Number(limit)));
-
-  // Can't use the Mongoose query helper here (aggregation bypasses pre-find hooks)
-  // so we manually add isDeleted: false when needed
   const match = includeDeleted ? matchStage : { ...matchStage, isDeleted: false };
 
   return Transaction.aggregate([
     { $match: match },
     { $sort: { createdAt: -1 } },
     { $limit: safeLimit },
-    {
-      $lookup: {
-        from:         'users',
-        localField:   'createdBy',
-        foreignField: '_id',
-        as:           'createdByUser',
-        pipeline: [{ $project: { name: 1, email: 1 } }],
-      },
-    },
-    {
-      $project: {
-        amount:       1,
-        currency:     1,
-        type:         1,
-        category:     1,
-        status:       1,
-        date:         1,
-        department:   1,
-        createdAt:    1,
-        createdBy:    { $arrayElemAt: ['$createdByUser', 0] },
-      },
-    },
+    { $lookup: { from: 'users', localField: 'createdBy', foreignField: '_id', as: 'createdByUser', pipeline: [{ $project: { name: 1, email: 1 } }] } },
+    { $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'categoryDoc', pipeline: [{ $project: { name: 1, slug: 1 } }] } },
+    { $project: {
+        amount: 1, currency: 1, type: 1, description: 1,
+        category: { $arrayElemAt: ['$categoryDoc', 0] },
+        status: 1, date: 1, department: 1, createdAt: 1,
+        createdBy: { $arrayElemAt: ['$createdByUser', 0] },
+    } },
   ]);
 }

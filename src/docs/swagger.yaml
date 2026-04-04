@@ -1,0 +1,151 @@
+openapi: 3.0.0
+info:
+  title: Finance Dashboard API
+  version: 1.0.0
+  description: API documentation for the Finance Dashboard backend.
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      accessToken:
+                        type: string
+                      user:
+                        type: object
+  /auth/me:
+    get:
+      summary: Get current authenticated user
+      tags: [Auth]
+      responses:
+        '200':
+          description: Returns the current user profile.
+  /transactions:
+    get:
+      summary: List transactions
+      tags: [Transactions]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A paginated list of transactions.
+    post:
+      summary: Create a new transaction
+      tags: [Transactions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                type:
+                  type: string
+                  enum: [income, expense, transfer, liability, asset, adjustment]
+                category:
+                  type: string
+                  description: ObjectId of the Category
+                description:
+                  type: string
+                date:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Transaction created successfully.
+  /dashboard/summary:
+    get:
+      summary: Get dashboard summary
+      tags: [Dashboard]
+      responses:
+        '200':
+          description: High-level financial KPIs.
+  /reports:
+    get:
+      summary: List generated reports
+      tags: [Reports]
+      responses:
+        '200':
+          description: A list of reports.
+    post:
+      summary: Generate a new report
+      tags: [Reports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [monthly, quarterly, annual, custom]
+                period:
+                  type: object
+                  properties:
+                    year:
+                      type: integer
+                    month:
+                      type: integer
+      responses:
+        '202':
+          description: Report generation started.
+  /notifications:
+    get:
+      summary: List user notifications
+      tags: [Notifications]
+      responses:
+        '200':
+          description: A list of notifications.

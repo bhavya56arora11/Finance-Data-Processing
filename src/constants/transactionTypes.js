@@ -1,8 +1,3 @@
-/**
- * Transaction type and subtype registry.
- * All validity checks flow through the exported helpers — never duplicate these strings elsewhere.
- */
-
 export const TRANSACTION_TYPES = {
   INCOME:     'income',
   EXPENSE:    'expense',
@@ -60,24 +55,10 @@ export const TRANSACTION_STATUSES = {
   VOIDED:           'voided',
 };
 
-// ─── Validation Helpers ────────────────────────────────────────────────────────
-
-/**
- * @param {string} type
- * @returns {boolean}
- */
 export function isValidType(type) {
   return Object.values(TRANSACTION_TYPES).includes(type);
 }
 
-/**
- * Validates that a subtype belongs to its parent type.
- * If no subtype is provided, returns true (subtype is optional).
- *
- * @param {string} type
- * @param {string} subtype
- * @returns {boolean}
- */
 export function isValidSubtype(type, subtype) {
   if (!subtype) return true;
   const validSubtypes = TRANSACTION_SUBTYPES[type];
@@ -85,10 +66,6 @@ export function isValidSubtype(type, subtype) {
   return validSubtypes.includes(subtype);
 }
 
-/**
- * @param {string} status
- * @returns {boolean}
- */
 export function isValidStatus(status) {
   return Object.values(TRANSACTION_STATUSES).includes(status);
 }

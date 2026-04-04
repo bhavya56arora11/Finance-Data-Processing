@@ -1,10 +1,6 @@
 import mongoose from 'mongoose';
 import { env } from './env.js';
 
-/**
- * Establishes a connection to MongoDB with retry-friendly event logging.
- * Exits the process on initial connection failure to prevent silent startup errors.
- */
 export async function connectDB() {
   mongoose.connection.on('connected', () => {
     console.log(`[MongoDB] Connected to: ${mongoose.connection.host}/${mongoose.connection.name}`);
@@ -24,7 +20,6 @@ export async function connectDB() {
 
   try {
     await mongoose.connect(env.mongoUri, {
-      // Mongoose 8+ has these as defaults, but keeping explicit for clarity
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
     });

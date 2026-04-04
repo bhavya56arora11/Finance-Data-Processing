@@ -1,214 +1,211 @@
 # Finance Dashboard Backend
 
-A production-thinking backend for a fintech company's finance dashboard, built to demonstrate architecture, security, and code quality decisions — not just working endpoints.
+A backend API for a multi-role finance dashboard system. Built as an internship assignment for Zorvyn, this project goes beyond basic CRUD to demonstrate how real financial systems handle access control, data integrity, audit trails, and reporting.
 
----
+## What This Project Does
 
-## Project Overview
+Imagine a company where different employees need different levels of access to financial data. An accountant should be able to log transactions but not delete them. An auditor should be able to see everything including deleted records. A viewer from the marketing department should only see their own department's data.
 
-This API serves a multi-role finance dashboard with full transaction lifecycle management, permission-based access control, structured audit logging, and aggregation-driven reporting. Every design decision prioritizes correctness and security over brevity.
-
----
+This backend handles all of that. It manages users, their roles, financial transactions, reports, and notifications — while making sure every action is properly authorized, validated, and logged.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js 18+ (ES Modules) |
-| Framework | Express 4 |
-| Database | MongoDB via Mongoose 8 |
-| Authentication | JWT (jsonwebtoken) — dual-token strategy |
-| Validation | Zod — schema-first, with cross-field rules |
-| Password Hashing | bcryptjs (rounds: 12) |
-| Request Logging | Morgan |
-| Rate Limiting | express-rate-limit |
-| Unique IDs | uuid (per-request correlation IDs) |
+| What | Why |
 
----
+| Node.js + Express | Lightweight, fast to set up, great ecosystem for REST APIs |
+| MongoDB + Mongoose | Flexible document model works well for financial records with varying fields |
+| JWT | Stateless authentication — no server-side session storage needed |
+| Zod | Schema-based validation that catches bad input before it reaches the database |
+| bcryptjs | Secure password hashing — passwords are never stored in plain text |
+| express-rate-limit | Prevents brute force attacks on login and abuse on heavy endpoints |
+| Jest + Supertest | Testing without spinning up a real server or database |
+| Swagger UI | Auto-generated interactive API documentation |
 
-## Architecture Decisions
+## Getting Started
 
-### 1. Permission-Based Middleware, Not Role-Based
-Routes use `requirePermission('read:transactions')` rather than `requireRole('admin')`. This means:
-- Roles are data (defined in `constants/roles.js`), not code
-- Adding a new role never requires touching middleware or routes
-- A single role change in `ROLE_PERMISSIONS` propagates everywhere automatically
-
-### 2. Soft Delete on Transactions
-Hard deletes are irreversible and destroy the audit trail. Soft delete (`isDeleted`, `deletedAt`, `deletedBy`) means:
-- Auditors can query deleted records with `view:deleted` permission
-- The change history is preserved
-- The `Transaction` model's `pre('find')` hook automatically hides deleted records unless the caller sets `_includeDeleted: true`
-
-### 3. JWT Over Sessions
-Sessions require server-side state (Redis, DB) — JWT is stateless. Trade-off: role changes don't take effect until the next token refresh (15 minutes max). This is acceptable for this use case and documented in Known Tradeoffs.
-
-### 4. Two-Token Strategy
-- **Access token** (15m): short-lived, carried in `Authorization: Bearer` header
-- **Refresh token** (7d): longer-lived, stored in `httpOnly; SameSite=Strict` cookie scoped to `/auth/refresh` only — inaccessible to JavaScript, not sent with other API requests
-
-### 5. Centralized Error Infrastructure
-All errors extend `AppError`. The global handler in `errorHandler.js` maps 7 different error origins (AppError, Mongoose validation, CastError, duplicate key, JWT errors, unknowns) to a single consistent JSON envelope. No raw Express HTML ever reaches the client.
-
-### 6. Audit Log as a Service
-`auditService.log()` is the only entrypoint to `AuditLog.create()`. Failures are caught and logged to stderr — they never propagate to the caller, so a DB hiccup during logging cannot fail a user-facing operation.
-
----
-
-## Setup Instructions
-
+You need Node.js 18 or higher and a running MongoDB instance before starting.
 ```bash
-# 1. Clone and install
-git clone <repo-url>
-cd finance-backend
+# Step 1 — Clone the project and install dependencies
+git clone (to clone the repository)
 npm install
 
-# 2. Configure environment
+# Step 2 — Create your environment file
 cp .env.example .env
-# Edit .env — fill in MONGO_URI, JWT_SECRET, JWT_REFRESH_SECRET
-
-# 3. Seed the database (creates 7 users + 20 sample transactions)
-npm run seed
-
-# 4. Start development server
-npm run dev
-
-# 5. Health check
-curl http://localhost:3000/health
 ```
 
-> **Requirements**: Node.js ≥ 18, MongoDB running locally or connection string in `.env`
+Open `.env` and fill in these values:
+```
+PORT=3000
+MONGO_URI=mongodb://localhost:27017/finance-dashboard
+JWT_SECRET=pick_a_long_random_string
+JWT_REFRESH_SECRET=pick_a_different_long_random_string
+JWT_ACCESS_EXPIRES=15m
+JWT_REFRESH_EXPIRES=7d
+NODE_ENV=development
+BASE_CURRENCY=USD
+```
+```bash
+# Step 3 — Seed the database with sample users, categories, and transactions
+npm run seed
 
----
+# Step 4 — Start the development server
+npm run dev
+```
 
-## Role System
+Once running, visit `http://localhost:3000/health` to confirm the server is up.
 
-| Role | Permissions |
-|---|---|
-| `super_admin` | All permissions |
-| `admin` | read, create, update, delete transactions · manage users · view audit logs · export · dashboard · insights |
-| `finance_manager` | read, create, update, **approve** transactions · dashboard · insights · export |
-| `accountant` | read, create, update transactions · dashboard |
-| `auditor` | read + **view deleted** transactions · view audit logs · dashboard · export |
-| `analyst` | read transactions · dashboard · **insights** |
-| `viewer` | read transactions (own department only) · dashboard |
-| `external_auditor` | read (scoped to assigned record IDs only) · dashboard |
+## Exploring the API
 
-> Role permissions are defined as data in `src/constants/roles.js` — `ROLE_PERMISSIONS` map.
+The easiest way to explore all endpoints is through the interactive Swagger docs:
+```
+http://localhost:3000/api-docs
+```
 
----
+Every endpoint is documented there with request examples, required fields, and response shapes. You can make real API calls directly from the browser.
 
-## API Reference
+## Seeded Users
 
-### Auth
+After running `npm run seed`, these users are available to test with. Every role in the system has a corresponding test account:
 
-| Method | Path | Permission | Description |
-|---|---|---|---|
-| `POST` | `/auth/register` | Public | Self-register (always assigns viewer role) |
-| `POST` | `/auth/login` | Public | Login, receive access token + refresh cookie |
-| `POST` | `/auth/refresh` | Public (cookie) | Exchange refresh cookie for new access token |
-| `POST` | `/auth/logout` | Public | Clear refresh token cookie |
+| Role | Email | Password |
 
-### Users
+| super_admin | superadmin@finance.dev | Password123 |
+| admin | admin@finance.dev | Password123 |
+| finance_manager | manager@finance.dev | Password123 |
+| accountant | accountant@finance.dev | Password123 |
+| auditor | auditor@finance.dev | Password123 |
+| analyst | analyst@finance.dev | Password123 |
+| viewer | viewer@finance.dev | Password123 |
+| external_auditor | external@finance.dev | Password123 |
 
-| Method | Path | Permission | Description |
-|---|---|---|---|
-| `GET` | `/users` | `manage:users` | List users (filters: role, status, department; paginated) |
-| `GET` | `/users/:id` | `manage:users` OR own profile | Get single user |
-| `PATCH` | `/users/:id` | `manage:users` | Update name / department / status |
-| `PATCH` | `/users/:id/role` | `manage:roles` | Change role (super_admin protection enforced) |
-| `DELETE` | `/users/:id` | `manage:users` | Soft-delete (sets status inactive) |
+## How Roles Work
 
-### Transactions
+Instead of checking roles directly in routes (like `if role === 'admin'`), this system uses permissions. Each role is assigned a set of permissions, and routes check for a specific permission rather than a specific role.
 
-| Method | Path | Permission | Description |
-|---|---|---|---|
-| `POST` | `/transactions` | `create:transactions` | Create transaction |
-| `GET` | `/transactions` | `read:transactions` | List with filters + scope + pagination |
-| `GET` | `/transactions/:id` | `read:transactions` | Get single transaction (scope enforced) |
-| `PUT` | `/transactions/:id` | `update:transactions` | Update transaction (state machine rules apply) |
-| `DELETE` | `/transactions/:id` | `delete:transactions` | Soft-delete (blocked if approved) |
-| `PATCH` | `/transactions/:id/approve` | `approve:transactions` | Approve pending transaction |
-| `PATCH` | `/transactions/:id/reject` | `approve:transactions` | Reject with required reason |
-| `PATCH` | `/transactions/:id/void` | `update:transactions` + privileged role | Void any non-voided transaction |
+This means if you ever need to add a new role or adjust what an existing role can do, you only change one place — the `ROLE_PERMISSIONS` map in `src/constants/roles.js` — and it automatically applies everywhere.
 
-### Dashboard
+Here is what each role can do:
 
-| Method | Path | Permission | Description |
-|---|---|---|---|
-| `GET` | `/dashboard/summary` | `view:dashboard` | Total income, expenses, net, by-status, by-currency (single $facet query) |
-| `GET` | `/dashboard/category-breakdown` | `view:dashboard` | Category totals, filterable by type / date / fiscal year |
-| `GET` | `/dashboard/trends` | `view:insights` | Monthly or weekly income/expense/net time series |
-| `GET` | `/dashboard/department-breakdown` | `view:insights` | Per-department income, expenses, net, count |
-| `GET` | `/dashboard/recent-activity` | `view:dashboard` | Last N transactions with creator name (default 10, max 50) |
+| Role | What they can do |
 
----
+| `super_admin` | Everything |
+| `admin` | Full transaction management, user management, audit logs, export, dashboard |
+| `finance_manager` | Create and update transactions, approve or reject pending ones, export, dashboard insights |
+| `accountant` | Create and update transactions (goes to approval queue), view dashboard |
+| `auditor` | Read-only access including soft-deleted records, audit logs, export |
+| `analyst` | Read transactions, view dashboard and insights |
+| `viewer` | Read transactions from their own department only, basic dashboard |
+| `external_auditor` | Read-only access limited to specific records assigned by an admin |
 
-## Error Codes Reference
+## How Authentication Works
 
-| Code | HTTP Status | When It Occurs |
-|---|---|---|
-| `VALIDATION_ERROR` | 400 | Zod or Mongoose schema validation fails |
-| `INVALID_ID` | 400 | MongoDB ObjectId is malformed (CastError) |
-| `AUTHENTICATION_ERROR` | 401 | Missing, invalid, or expired token; wrong credentials |
-| `TOKEN_EXPIRED` | 401 | JWT signature valid but token has expired |
-| `AUTHORIZATION_ERROR` | 403 | User authenticated but lacks required permission |
-| `SCOPE_VIOLATION` | 403 | User tries to access records outside their data scope |
-| `OPERATION_NOT_PERMITTED` | 403 | Role-level restriction beyond permission check (e.g. void by accountant) |
-| `NOT_FOUND` | 404 | Requested resource does not exist |
-| `CONFLICT` | 409 | Duplicate key (email, referenceNumber) |
-| `INVALID_STATE_TRANSITION` | 409 | Invalid status machine move (e.g. approve an already-approved transaction) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Too many requests for the route's limiter window |
-| `DATABASE_ERROR` | 500 | Unexpected Mongoose/MongoDB error (no internals leaked) |
-| `INTERNAL_SERVER_ERROR` | 500 | Unhandled programming error (no internals leaked in production) |
+Login returns two tokens:
 
-All error responses follow this exact shape:
+- **Access token** — valid for 15 minutes, sent in the `Authorization: Bearer` header with every request
+- **Refresh token** — valid for 7 days, stored in an httpOnly cookie and used to get a new access token without logging in again
+
+When a refresh token is used, a new one is issued and the old one is immediately invalidated. If someone tries to reuse an old refresh token, the system detects it and kills the session entirely. This protects against token theft.
+
+## Transaction Lifecycle
+
+Transactions do not just exist in two states. They move through a defined workflow:
+```
+draft → pending_approval → approved
+                        → rejected
+approved → voided
+```
+
+Who controls each step:
+
+- Accountants create transactions — they land in `pending_approval`
+- Finance managers and above can approve or reject
+- Admins can create pre-approved transactions directly
+- Only senior roles can void an approved transaction
+- Approved transactions cannot be deleted — they must be voided first
+
+## What Happens When Something Is Deleted
+
+Nothing is permanently deleted from the transactions table. Instead a soft delete marks the record as deleted with a timestamp and who deleted it. The record disappears from normal queries but stays in the database.
+
+Auditors can still see soft-deleted records. Admins can restore them. This preserves the full audit trail which matters a lot in financial systems.
+
+## Reports
+
+Generating a report for a full year or quarter can be slow because it involves heavy database aggregations. Rather than making the client wait, the system works like this:
+
+1. You request a report — the API responds immediately with a report ID and status `generating`
+2. The aggregation runs in the background
+3. When done, the report status updates to `ready` and you get a notification
+4. You fetch the full report data using the report ID
+
+This keeps response times fast and gives you a proper async workflow pattern.
+
+## Notifications
+
+The system generates internal notifications automatically when key things happen — a transaction gets approved or rejected, your role changes, a report finishes generating, your account status changes. Notifications are per-user and never cross between accounts.
+
+## Every Error Looks The Same
+
+No matter what goes wrong, every error response follows this exact shape:
 ```json
 {
   "success": false,
   "error": {
-    "code": "ERROR_CODE",
-    "message": "Human readable message",
+    "code": "AUTHORIZATION_ERROR",
+    "message": "Your role (viewer) does not have permission: delete:transactions",
     "details": null,
-    "timestamp": "2025-01-01T00:00:00.000Z",
-    "requestId": "uuid-v4"
+    "timestamp": "2026-04-04T10:00:00.000Z",
+    "requestId": "a1b2c3d4-..."
   }
 }
 ```
 
----
+This makes it easy for any frontend or client to handle errors consistently without parsing different shapes.
 
-## Assumptions Made
+Common error codes you will encounter:
 
-1. **Base currency is USD** — `convertedAmount` and `baseCurrency` fields are placeholders; actual FX conversion is a Phase 2 concern
-2. **Fiscal year starts January 1** — calendar year = fiscal year; Q1 = Jan–Mar, Q2 = Apr–Jun, Q3 = Jul–Sep, Q4 = Oct–Dec
-3. **Self-registration always produces a viewer** — elevated roles are assigned by an admin via `PATCH /users/:id/role`
-4. **External auditor scope is set by admin** — the `scopedRecords` array on the user document is populated by an admin; there's no UI flow for this in this phase
-5. **Refresh tokens are stateless** — not stored server-side; revocation is not instant but bounded by the 15-minute access token TTL
-6. **Audit logs are append-only** — there is no delete or update API for audit logs
-7. **Password-reset flow is out of scope** — would require email delivery (Phase 2)
+| Code | Status | When it happens |
 
----
+| `VALIDATION_ERROR` | 400 | A required field is missing or in the wrong format |
+| `AUTHENTICATION_ERROR` | 401 | No token, wrong token, or bad credentials |
+| `TOKEN_EXPIRED` | 401 | Access token has expired — use refresh token |
+| `AUTHORIZATION_ERROR` | 403 | Your role does not have the required permission |
+| `SCOPE_VIOLATION` | 403 | You are trying to access data outside your department/scope |
+| `OPERATION_NOT_PERMITTED` | 403 | The action is blocked by business rules (e.g. deleting an approved transaction) |
+| `NOT_FOUND` | 404 | The requested resource does not exist |
+| `CONFLICT` | 409 | Duplicate entry (e.g. email already registered) |
+| `INVALID_STATE_TRANSITION` | 409 | Trying to move a record to an invalid status (e.g. approving an already approved transaction) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Too many requests in a short period |
+| `INTERNAL_SERVER_ERROR` | 500 | Something unexpected broke — details are logged server-side, never exposed to the client |
 
-## Known Tradeoffs
+## Running Tests
+```bash
+npm test
+```
 
-| Tradeoff | Rationale |
-|---|---|
-| No real FX conversion | Requires an external rates API; `convertedAmount` is set to `amount` as a placeholder |
-| No email verification | Out of scope for this phase; would require an email provider integration |
-| Stateless refresh tokens | No server-side storage means instant revocation isn't possible. Mitigation: short (15m) access token TTL |
-| Role changes need refresh | Because permissions are baked into the JWT at login time, a role change doesn't take effect until the user logs in again or refreshes their token |
-| Text search requires index warmup | MongoDB text indexes take time to build on large existing datasets |
+Tests use an in-memory MongoDB instance so no real database is touched. The test suite covers:
 
----
+- Auth flow — registration, login, token refresh, rotation, logout
+- Access control — every role tested against every sensitive endpoint
+- Dashboard accuracy — aggregation results verified against known seeded data
+- Transaction lifecycle — state machine rules, soft delete, restore, export
+- Pagination — both offset and cursor modes
 
-## Phase 2 Enhancements
+## Assumptions
 
-- **Real FX conversion**: Integrate an exchange rate API (e.g. Open Exchange Rates) to populate `convertedAmount` at creation time
-- **Token revocation**: Maintain a Redis-backed token blacklist for immediate refresh token invalidation on logout/role change
-- **Email verification & password reset**: SMTP/SendGrid integration with time-limited verification tokens
-- **Webhook events**: Emit events on transaction approval/rejection for downstream systems
-- **Bulk operations**: Import transactions via CSV with streaming validation
-- **Audit log TTL**: Automatic rotation of audit logs older than N days via MongoDB TTL index
-- **External auditor management**: Admin UI flow to assign `scopedRecords` to `external_auditor` accounts
-- **Two-factor authentication**: TOTP-based 2FA for admin and finance_manager roles
+A few decisions were made where the requirements left room for interpretation:
+
+- **Base currency is USD** — the schema has fields for currency conversion but actual FX rate lookups are not implemented. This would need a third-party rates API in production.
+- **Fiscal year is calendar year** — Q1 is January to March, Q2 is April to June, and so on. Companies with non-standard fiscal years would need this adjusted.
+- **Self-registration always creates a viewer** — you cannot self-assign a higher role. An admin must promote you.
+- **External auditor scope is admin-assigned** — the records an external auditor can see are set by populating their `scopedRecords` array via the user management endpoints.
+- **Audit logs are permanent** — there is no API to delete or edit them. This is intentional.
+- **No email delivery** — password reset and email verification are out of scope. They would require integrating an email provider.
+
+## Tradeoffs
+
+Honest notes on what was simplified and why:
+
+- **Refresh tokens stored as hashes** — a more robust approach would be a dedicated `RefreshToken` collection with one row per device. The current approach stores one hash per user which means logging in on a new device invalidates the previous one.
+- **Background jobs use async callbacks** — a production system would use a proper job queue like BullMQ with Redis. The current approach runs the aggregation in a detached async function which works but has no retry logic if the server restarts mid-generation.
+- **No real currency conversion** — amounts in non-USD currencies are stored as-is. The `convertedAmount` field is a placeholder for when FX integration is added.

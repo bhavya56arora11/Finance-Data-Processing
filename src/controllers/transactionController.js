@@ -2,9 +2,7 @@ import { z } from 'zod';
 import { TRANSACTION_TYPES, TRANSACTION_STATUSES, isValidSubtype } from '../constants/transactionTypes.js';
 import * as txService from '../services/transactionService.js';
 import { sendSuccess } from '../utils/responseFormatter.js';
-import { ValidationError } from '../errors/errorTypes.js';
-
-// ─── Validation Schemas ───────────────────────────────────────────────────────
+import { ValidationError, OperationNotPermittedError } from '../errors/errorTypes.js';
 
 const transactionSchema = z.object({
   amount: z.number({ required_error: 'Amount is required' })
@@ -22,9 +20,10 @@ const transactionSchema = z.object({
 
   subtype: z.string().optional(),
 
-  category: z.string({ required_error: 'Category is required' })
-    .trim()
-    .min(2, 'Category must be at least 2 characters'),
+  category: z.string({ required_error: 'Category is required' }).regex(/^[a-f\d]{24}$/i, 'Must be a valid ObjectId'),
+
+  description: z.string({ required_error: 'Description is required' })
+    .trim().min(1, 'Description is required').max(200, 'Description cannot exceed 200 characters'),
 
   date: z.coerce.date({ required_error: 'Date is required' })
     .refine((d) => d <= new Date(), 'Date cannot be in the future'),
@@ -36,7 +35,6 @@ const transactionSchema = z.object({
   project:         z.string().trim().optional(),
   tags:            z.array(z.string().trim()).optional(),
 })
-// Cross-field validation: subtype must belong to the selected type
 .refine(
   (data) => isValidSubtype(data.type, data.subtype),
   (data) => ({
@@ -66,13 +64,12 @@ const listQuerySchema = z.object({
   limit:         z.coerce.number().int().min(1).max(100).default(20),
   sortBy:        z.string().optional(),
   sortOrder:     z.enum(['asc', 'desc']).optional(),
+  cursor:        z.string().optional(), // base64-encoded _id for cursor pagination
 });
 
 const rejectSchema = z.object({
   reason: z.string({ required_error: 'Rejection reason is required' }).min(1, 'Reason cannot be empty'),
 });
-
-// ─── Validation Helper ────────────────────────────────────────────────────────
 
 function validate(schema, data) {
   const result = schema.safeParse(data);
@@ -86,11 +83,6 @@ function validate(schema, data) {
   return result.data;
 }
 
-// ─── Controllers ──────────────────────────────────────────────────────────────
-
-/**
- * POST /transactions
- */
 export async function createTransaction(req, res, next) {
   try {
     const data = validate(transactionSchema, req.body);
@@ -101,16 +93,30 @@ export async function createTransaction(req, res, next) {
   }
 }
 
-/**
- * GET /transactions
- */
 export async function listTransactions(req, res, next) {
   try {
-    const query  = validate(listQuerySchema, req.query);
+    const query = validate(listQuerySchema, req.query);
+
+    // Cursor mode: cursor param present
+    if (query.cursor) {
+      const result = await txService.listTransactionsCursor(query, req.queryScope);
+      return sendSuccess(res, {
+        transactions: result.transactions,
+        pagination: {
+          mode:       'cursor',
+          nextCursor: result.nextCursor,
+          hasNext:    result.hasNext,
+          limit:      query.limit,
+        },
+      });
+    }
+
+    // Offset mode (default)
     const result = await txService.listTransactions(query, req.queryScope);
     return sendSuccess(res, {
       transactions: result.transactions,
       pagination: {
+        mode:       'offset',
         total:      result.total,
         page:       result.page,
         totalPages: result.totalPages,
@@ -122,9 +128,6 @@ export async function listTransactions(req, res, next) {
   }
 }
 
-/**
- * GET /transactions/:id
- */
 export async function getTransactionById(req, res, next) {
   try {
     const tx = await txService.getTransactionById(req.params.id, req.queryScope, req.user);
@@ -134,12 +137,8 @@ export async function getTransactionById(req, res, next) {
   }
 }
 
-/**
- * PUT /transactions/:id
- */
 export async function updateTransaction(req, res, next) {
   try {
-    // Partial — all fields optional for updates
     const data = validate(transactionSchema.partial(), req.body);
     const tx   = await txService.updateTransaction(req.params.id, data, req.user, req.id);
     return sendSuccess(res, { transaction: tx }, 'Transaction updated');
@@ -148,9 +147,6 @@ export async function updateTransaction(req, res, next) {
   }
 }
 
-/**
- * DELETE /transactions/:id
- */
 export async function deleteTransaction(req, res, next) {
   try {
     await txService.deleteTransaction(req.params.id, req.user, req.id);
@@ -160,9 +156,6 @@ export async function deleteTransaction(req, res, next) {
   }
 }
 
-/**
- * PATCH /transactions/:id/approve
- */
 export async function approveTransaction(req, res, next) {
   try {
     const tx = await txService.approveTransaction(req.params.id, req.user, req.id);
@@ -172,9 +165,6 @@ export async function approveTransaction(req, res, next) {
   }
 }
 
-/**
- * PATCH /transactions/:id/reject
- */
 export async function rejectTransaction(req, res, next) {
   try {
     const { reason } = validate(rejectSchema, req.body);
@@ -185,13 +175,114 @@ export async function rejectTransaction(req, res, next) {
   }
 }
 
-/**
- * PATCH /transactions/:id/void
- */
 export async function voidTransaction(req, res, next) {
   try {
     const tx = await txService.voidTransaction(req.params.id, req.user, req.id);
     return sendSuccess(res, { transaction: tx }, 'Transaction voided');
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function restoreTransaction(req, res, next) {
+  try {
+    const tx = await txService.restoreTransaction(req.params.id, req.user, req.id);
+    return sendSuccess(res, { transaction: tx }, 'Transaction restored');
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function listDeletedTransactions(req, res, next) {
+  try {
+    const query = validate(listQuerySchema, req.query);
+    const result = await txService.listDeletedTransactions(query, req.queryScope);
+    return sendSuccess(res, {
+      transactions: result.transactions,
+      pagination: { mode: 'offset', total: result.total, page: result.page, totalPages: result.totalPages, limit: query.limit },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+const exportQuerySchema = z.object({
+  format:        z.enum(['json', 'csv']).default('json'),
+  search:        z.string().optional(),
+  type:          z.enum(Object.values(TRANSACTION_TYPES)).optional(),
+  subtype:       z.string().optional(),
+  category:      z.string().optional(),
+  status:        z.enum(Object.values(TRANSACTION_STATUSES)).optional(),
+  department:    z.string().optional(),
+  project:       z.string().optional(),
+  tags:          z.union([z.string(), z.array(z.string())]).optional(),
+  from:          z.string().optional(),
+  to:            z.string().optional(),
+  minAmount:     z.coerce.number().optional(),
+  maxAmount:     z.coerce.number().optional(),
+  currency:      z.string().optional(),
+  fiscalYear:    z.coerce.number().optional(),
+  fiscalQuarter: z.coerce.number().min(1).max(4).optional(),
+  createdBy:     z.string().optional(),
+  sortBy:        z.string().optional(),
+  sortOrder:     z.enum(['asc', 'desc']).optional(),
+});
+
+export async function exportTransactions(req, res, next) {
+  try {
+    const { format, ...filterParams } = validate(exportQuerySchema, req.query);
+    const result = await txService.exportTransactions(filterParams, req.queryScope);
+
+    if (result.length > 1000) {
+      throw new OperationNotPermittedError('Export exceeds 1000 records. Apply more filters to narrow the results.');
+    }
+
+    await txService.logExport(req.user, req.id, filterParams, result.length);
+
+    if (format === 'csv') {
+      const headers = ['Date', 'Description', 'Category', 'Type', 'Subtype', 'Amount', 'Currency', 'Status', 'Department', 'Reference', 'Notes'];
+      const escCsv = (v) => {
+        const s = String(v ?? '');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const rows = result.map((t) => [
+        t.date ? new Date(t.date).toISOString().split('T')[0] : '',
+        t.description, t.category?.name ?? t.category ?? '', t.type, t.subtype ?? '',
+        t.amount, t.currency, t.status, t.department ?? '', t.referenceNumber ?? '', t.notes ?? '',
+      ].map(escCsv).join(','));
+      const csv = [headers.join(','), ...rows].join('\n');
+
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="transactions-${ts}.csv"`);
+      return res.send(csv);
+    }
+
+    return sendSuccess(res, { transactions: result, count: result.length });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// GET /transactions/search — dedicated search endpoint
+const searchQuerySchema = listQuerySchema.extend({
+  search: z.string().min(2, 'Search query must be at least 2 characters'),
+});
+
+export async function searchTransactions(req, res, next) {
+  try {
+    const query = validate(searchQuerySchema, req.query);
+    const result = await txService.listTransactions(query, req.queryScope);
+    return sendSuccess(res, {
+      transactions: result.transactions,
+      pagination: {
+        mode:       'offset',
+        total:      result.total,
+        page:       result.page,
+        totalPages: result.totalPages,
+        limit:      query.limit,
+      },
+    });
   } catch (err) {
     return next(err);
   }
